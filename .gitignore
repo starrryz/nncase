@@ -318,3 +318,9 @@ global.json
 
 # set huggingface repo
 tests/llm/*/
+
+# 忽略所有 user_guide 示例脚本和目录
+/examples/user_guide/
+
+# 忽略特定的测试文件（相对于仓库根目录）
+/src/Nncase.Tests/EGraph/UnitTestExtractor.cs
