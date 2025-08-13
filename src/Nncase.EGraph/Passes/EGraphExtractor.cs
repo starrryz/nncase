@@ -15,9 +15,7 @@ using Nncase.IR.Shapes;
 
 namespace Nncase.Passes;
 
-public delegate void EGraphExtractConstrains(CpModel model, IReadOnlyDictionary<ENode, BoolVar> vars);
-
-internal class EGraphExtractor
+internal class EGraphExtractor : IEGraphExtractor
 {
     private readonly EGraphCostModel _costModel;
 
@@ -50,6 +48,7 @@ internal class EGraphExtractor
         // 2. when pick node, must pick one child node.
         foreach (var n in nodes)
         {
+            // ¬n ∨ (child.Nodes[0] ∨ child.Nodes[1] ∨ …)
             var ns = new[] { varMemo[n].Not() };
             foreach (var child in n.Children)
             {
@@ -179,6 +178,7 @@ internal class EGraphExtractor
         visited.Add(root);
         while (queue.Any())
         {
+            // remove & return the first
             var front = queue.Dequeue();
             foreach (var node in front.Nodes)
             {
