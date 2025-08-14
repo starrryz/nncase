@@ -116,19 +116,25 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         };
-        File.WriteAllText("egraph_flex_dump.json", JsonSerializer.Serialize(flexRoot, opts));
 
         // 将输出的json文件放入更新在外部目录，方便共享
         var sharedRootDir = "/compiler/external_shared";
+        var smootheDatasetDir = "/compiler/yaohuicai-smoothe-artifact-f98add8/dataset/data_from_nncase";
         var sharedInputDir = Path.Combine(sharedRootDir, "input");
         var sharedOutputDir = Path.Combine(sharedRootDir, "output"); // 预留：后续 smoothe 输出可统一指向这里
         var nncaseTestsBinDir = "/compiler/nncase/src/Nncase.Tests/bin/Release/net8.0";
 
-        // 另一个思路是编译一次就删除一次，文件名不变，但是内容一直在变，反正这只是一个中间产物，输入是EGraph，输出是BaseExpr
-        var nncaseSelectionName = "selection_newly_08_11.json"; // 这个后面需要改成一类文件，因为不同的生成的文件名也不一致，
+        // 生成时间戳前缀，例如 0814_14_52
+        string timestamp = DateTime.Now.ToString("MMdd_HH_mm");
 
-        var egraphDumpPath = Path.Combine(sharedInputDir, "egraph_flex_dump.json");
+        // 用时间戳生成两个文件名
+        var dumpFileName = $"{timestamp}_dump.json";
+        var selectionFileName = $"{timestamp}_selection.json";
+
+        var egraphDumpPath = Path.Combine(sharedInputDir, dumpFileName);
+        var egraphDumpPath2 = Path.Combine(smootheDatasetDir, dumpFileName);
         File.WriteAllText(egraphDumpPath, JsonSerializer.Serialize(flexRoot, opts));
+        File.WriteAllText(egraphDumpPath2, JsonSerializer.Serialize(flexRoot, opts));
 
         // === 7) 调用子进程运行 smoothe（工作目录保持为 smoothe 仓库） ===
         var smootheRepoDir = "/compiler/yaohuicai-smoothe-artifact-f98add8";
@@ -177,10 +183,10 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         // 候选位置：优先 external_shared/output，然后 smoothe 仓库内常见输出处；否则模糊查找
         string[] candidateSelectionPaths =
         {
-            Path.Combine(sharedOutputDir, nncaseSelectionName),                          // 共享输出（以后 smoothe 可切到这里）
-            Path.Combine(smootheRepoDir, nncaseSelectionName),
-            Path.Combine(smootheRepoDir, "logs", "smoothe_log", nncaseSelectionName),
-            Path.Combine(smootheRepoDir, "output", nncaseSelectionName),
+            Path.Combine(smootheRepoDir, "logs", "smoothe_log", selectionFileName),
+            Path.Combine(sharedOutputDir, selectionFileName),                          // 共享输出（以后 smoothe 可切到这里）
+            Path.Combine(smootheRepoDir, selectionFileName),
+            Path.Combine(smootheRepoDir, "output", selectionFileName),
         };
 
         // 这里的赋值是xx.json结尾
@@ -190,7 +196,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         if (foundSelection is null)
         {
             var cand = new DirectoryInfo(smootheRepoDir)
-                .EnumerateFiles("selection*.json", SearchOption.AllDirectories)
+                .EnumerateFiles("*_selection.json", SearchOption.AllDirectories)
                 .OrderByDescending(f => f.LastWriteTimeUtc)
                 .FirstOrDefault();
             if (cand is not null)
@@ -209,11 +215,13 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         }
 
         // if find, copy this into where can be used by nncase
-        var selectionPath = Path.Combine(nncaseTestsBinDir, nncaseSelectionName);
+        var selectionPath = Path.Combine(nncaseTestsBinDir, selectionFileName);
+        var externalOutputPath = Path.Combine(sharedOutputDir, selectionFileName);
 
         // first copy and then check
         File.Copy(foundSelection, selectionPath, overwrite: true);
-        if (!File.Exists(selectionPath))
+        File.Copy(foundSelection, externalOutputPath, overwrite: true);
+        if (!File.Exists(selectionPath) || !File.Exists(externalOutputPath))
         {
             throw new FileNotFoundException($"selection json not found: {selectionPath}");
         }
