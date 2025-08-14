@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -102,7 +103,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
             }
         }
 
-        // 6) 落盘 egraph_flex_dump.json
+        // 6) 落盘 egraph_flex_dump.json，生成输入json文件
         var rootEclasses = new List<string> { rootClass.Id.ToString() };
         var flexRoot = new
         {
@@ -117,22 +118,120 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         };
         File.WriteAllText("egraph_flex_dump.json", JsonSerializer.Serialize(flexRoot, opts));
 
-        // 从这开始是需要添加调用子进程的
+        // 将输出的json文件放入更新在外部目录，方便共享
+        var sharedRootDir = "/compiler/external_shared";
+        var sharedInputDir = Path.Combine(sharedRootDir, "input");
+        var sharedOutputDir = Path.Combine(sharedRootDir, "output"); // 预留：后续 smoothe 输出可统一指向这里
+        var nncaseTestsBinDir = "/compiler/nncase/src/Nncase.Tests/bin/Release/net8.0";
 
-        // 7) 读取 selection json，并按选择复原表达式
-        var selectionPath = Path.Combine(Environment.CurrentDirectory, "selection_newly_08_11.json");
+        // 另一个思路是编译一次就删除一次，文件名不变，但是内容一直在变，反正这只是一个中间产物，输入是EGraph，输出是BaseExpr
+        var nncaseSelectionName = "selection_newly_08_11.json"; // 这个后面需要改成一类文件，因为不同的生成的文件名也不一致，
+
+        var egraphDumpPath = Path.Combine(sharedInputDir, "egraph_flex_dump.json");
+        File.WriteAllText(egraphDumpPath, JsonSerializer.Serialize(flexRoot, opts));
+
+        // === 7) 调用子进程运行 smoothe（工作目录保持为 smoothe 仓库） ===
+        var smootheRepoDir = "/compiler/yaohuicai-smoothe-artifact-f98add8";
+        var condaExe = "/opt/conda/condabin/conda";
+        var args = "run -n smoothe-env python launch.py --acyclic --dataset data_from_nncase --method smoothe --repeat 1 --greedy_ini";
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = condaExe,
+            Arguments = args,
+            WorkingDirectory = smootheRepoDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        using var proc = System.Diagnostics.Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start smoothe subprocess (conda run).");
+        string stdOut = proc.StandardOutput.ReadToEnd();
+        string stdErr = proc.StandardError.ReadToEnd();
+
+        // 硬超时（按需调整）
+        if (!proc.WaitForExit((int)TimeSpan.FromMinutes(15).TotalMilliseconds))
+        {
+            try
+            {
+                proc.Kill(entireProcessTree: true);
+            }
+            catch
+            { /* ignored */
+            }
+
+            throw new TimeoutException("smoothe subprocess timeout.");
+        }
+
+        if (proc.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"smoothe subprocess failed with exit code {proc.ExitCode}.\n[stdout]\n{stdOut}\n[stderr]\n{stdErr}");
+        }
+
+        // 新建目录，如已存在相当于做一次检查，
+        Directory.CreateDirectory(nncaseTestsBinDir);
+
+        // 候选位置：优先 external_shared/output，然后 smoothe 仓库内常见输出处；否则模糊查找
+        string[] candidateSelectionPaths =
+        {
+            Path.Combine(sharedOutputDir, nncaseSelectionName),                          // 共享输出（以后 smoothe 可切到这里）
+            Path.Combine(smootheRepoDir, nncaseSelectionName),
+            Path.Combine(smootheRepoDir, "logs", "smoothe_log", nncaseSelectionName),
+            Path.Combine(smootheRepoDir, "output", nncaseSelectionName),
+        };
+
+        // 这里的赋值是xx.json结尾
+        string? foundSelection = candidateSelectionPaths.FirstOrDefault(File.Exists);
+
+        // rescued by recursive search the whole dir
+        if (foundSelection is null)
+        {
+            var cand = new DirectoryInfo(smootheRepoDir)
+                .EnumerateFiles("selection*.json", SearchOption.AllDirectories)
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (cand is not null)
+            {
+                foundSelection = cand.FullName;
+            }
+        }
+
+        // no method is valid, throw error
+        if (foundSelection is null || !File.Exists(foundSelection))
+        {
+            throw new FileNotFoundException(
+                $"Cannot locate selection json produced by smoothe.\n" +
+                $"Tried: {string.Join(", ", candidateSelectionPaths)}\n" +
+                $"WorkingDirectory: {smootheRepoDir}\n[stdout]\n{stdOut}\n[stderr]\n{stdErr}");
+        }
+
+        // if find, copy this into where can be used by nncase
+        var selectionPath = Path.Combine(nncaseTestsBinDir, nncaseSelectionName);
+
+        // first copy and then check
+        File.Copy(foundSelection, selectionPath, overwrite: true);
         if (!File.Exists(selectionPath))
         {
             throw new FileNotFoundException($"selection json not found: {selectionPath}");
         }
 
-        // 说明：SmoothESelection 为你已有的重建逻辑工具类
+        // and finally back here and use it
         var extracted = SmoothESelection.ExtractWithSmoothe(rootClass, eGraph, selectionPath);
 
-        // 8) （可选）把复原出来的表达式放入新 egraph 并导出 dot，便于目视检查
-        var egAfter = new EGraph();
-        _ = egAfter.Add(extracted);
-        EGraphPrinter.DumpEgraphAsDot(egAfter, "smoothe_extract.dot");
+        // (optional) intend to verify it by dump dot
+        try
+        {
+            var egAfter = new EGraph();
+            _ = egAfter.Add(extracted);
+            EGraphPrinter.DumpEgraphAsDot(egAfter, "smoothe_extract.dot");
+        }
+        catch
+        {
+        }
+
         return extracted;
     }
 
