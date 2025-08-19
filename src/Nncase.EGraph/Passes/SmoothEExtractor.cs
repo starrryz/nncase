@@ -119,7 +119,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
 
         // 将输出的json文件放入更新在外部目录，方便共享
         var sharedRootDir = "/compiler/external_shared";
-        var smootheDatasetDir = "/compiler/yaohuicai-smoothe-artifact-f98add8/dataset/data_from_nncase";
+        var smootheDatasetDir = "/compiler/smoothe-sync/dataset/data_from_nncase";
         var sharedInputDir = Path.Combine(sharedRootDir, "input");
         var sharedOutputDir = Path.Combine(sharedRootDir, "output"); // 预留：后续 smoothe 输出可统一指向这里
         var nncaseTestsBinDir = "/compiler/nncase/src/Nncase.Tests/bin/Release/net8.0";
@@ -137,7 +137,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         File.WriteAllText(egraphDumpPath2, JsonSerializer.Serialize(flexRoot, opts));
 
         // === 7) 调用子进程运行 smoothe（工作目录保持为 smoothe 仓库） ===
-        var smootheRepoDir = "/compiler/yaohuicai-smoothe-artifact-f98add8";
+        var smootheRepoDir = "/compiler/smoothe-sync";
         var condaExe = "/opt/conda/condabin/conda";
         var args = "run -n smoothe-env python launch.py --acyclic --dataset data_from_nncase --method smoothe --repeat 1 --greedy_ini";
 

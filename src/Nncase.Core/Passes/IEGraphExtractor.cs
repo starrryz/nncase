@@ -23,7 +23,7 @@ public interface IEGraphExtractor
     /// </summary>
     /// <param name="root">Root EClass.</param>
     /// <param name="eGraph">EGraph instance.</param>
-    /// <param name="constrains">111.</param>
+    /// <param name="constrains">maybe design for auto-dist, however now has no use.</param>
     /// <returns>Extracted expression.</returns>
     // Due to the use of constrains of current extractor, we keep it as less change as possible.
     BaseExpr Extract(EClass root, IEGraph eGraph, EGraphExtractConstrains[] constrains);

@@ -46,6 +46,8 @@ public static class EGraphExtensions
         // 2. start the cost evaluator
         var costModel = new CostModel.EGraphCostEvaluator(root.Find(), compileOptions, basefunc_cost_evaluator, false).Evaluate();
 
+        // switch to smoothe (need to do : choose 1 from 2 by inheriting the same interface)
+        // return new SmoothEExtractor(compileOptions).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
         return new EGraphExtractor(costModel).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
     }
 }
