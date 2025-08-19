@@ -60,3 +60,10 @@
 *.fsproj text=auto
 *.dbproj text=auto
 *.sln text=auto eol=crlf
+
+# 永远保留本地版本（不被上游覆盖）
+src/Nncase.EGraph/Passes/SmoothEselection.cs merge=ours
+src/Nncase.Tests/EGraph/UnitTestExtractor.cs merge=ours
+src/Nncase.Core/Passes/IEGraphExtractor.cs merge=ours
+src/Nncase.EGraph/Passes/EGraphExtractor.cs merge=ours
+src/Nncase.EGraph/Passes/SmoothEExtractor.cs merge=ours
