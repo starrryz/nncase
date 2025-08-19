@@ -11,7 +11,9 @@ using Nncase.Utilities;
 
 namespace Nncase.Schedule.Bufferize;
 
-public sealed record BufferScheduleResult(IEnumerable<BufferLifetime> Buffers, long MemoryPoolSize, int Alignment);
+public sealed record BufferScheduleResult(IReadOnlyDictionary<TIR.PhysicalBuffer, BufferLifetime> Buffers, long MemoryPoolStart, long MemoryPoolEnd, int Alignment);
+
+public sealed record BufferScheduleOptions(long StartAddress = 0);
 
 public abstract class BufferScheduler
 {
@@ -26,23 +28,23 @@ public abstract class BufferScheduler
 
     public MemoryLocation MemoryLocation { get; }
 
-    public static BufferScheduleResult Schedule(MemoryLocation memoryLocation, IEnumerable<BufferLifetime> lifetimes)
+    public static BufferScheduleResult Schedule(MemoryLocation memoryLocation, IReadOnlyDictionary<TIR.PhysicalBuffer, BufferLifetime> lifetimes, BufferScheduleOptions options)
     {
         if (memoryLocation == MemoryLocation.Data)
         {
             foreach (var schedulerType in _bufferSchedulerTypes)
             {
                 var scheduler = (BufferScheduler)ActivatorUtilities.CreateInstance(CompileSessionScope.GetCurrentThrowIfNull(), schedulerType, memoryLocation);
-                if (scheduler.TrySchedule(lifetimes, out var result))
+                if (scheduler.TrySchedule(lifetimes, options, out var result))
                 {
                     return result;
                 }
             }
         }
-        else if (memoryLocation is MemoryLocation.Output or MemoryLocation.Rdata or MemoryLocation.ThreadLocalRdata)
+        else if (memoryLocation is MemoryLocation.Output or MemoryLocation.Rdata or MemoryLocation.ThreadLocalRdata or MemoryLocation.BlockLocalRdata)
         {
             var scheduler = new LinearBufferScheduler(memoryLocation);
-            if (scheduler.TrySchedule(lifetimes, out var result))
+            if (scheduler.TrySchedule(lifetimes, options, out var result))
             {
                 return result;
             }
@@ -51,39 +53,40 @@ public abstract class BufferScheduler
         throw new NotSupportedException("Unable to schedule buffers");
     }
 
-    public static IReadOnlyDictionary<MemoryLocation, BufferScheduleResult> Schedule(IEnumerable<BufferLifetime> lifetimes)
+    public static IReadOnlyDictionary<MemoryLocation, BufferScheduleResult> Schedule(IReadOnlyDictionary<TIR.PhysicalBuffer, BufferLifetime> lifetimes, Func<MemoryLocation, BufferScheduleOptions> options)
     {
         var result = new Dictionary<MemoryLocation, BufferScheduleResult>();
-        foreach (var group in lifetimes.GroupBy(x => x.Buffer.MemSpan.Location))
+        foreach (var group in lifetimes.GroupBy(x => x.Value.Buffer.Location))
         {
-            if (group.Key is MemoryLocation.Output or MemoryLocation.Data or MemoryLocation.Rdata or MemoryLocation.ThreadLocalRdata)
+            if (group.Key is MemoryLocation.Output or MemoryLocation.Data or MemoryLocation.Rdata or MemoryLocation.ThreadLocalRdata or MemoryLocation.BlockLocalRdata)
             {
-                result.Add(group.Key, Schedule(group.Key, group));
+                var lifetimeDict = group.ToDictionary(x => x.Key, x => x.Value, (IEqualityComparer<TIR.PhysicalBuffer>)ReferenceEqualityComparer.Instance);
+                result.Add(group.Key, Schedule(group.Key, lifetimeDict, options(group.Key)));
             }
         }
 
         return result;
     }
 
-    public bool TrySchedule(IEnumerable<BufferLifetime> lifetimes, [MaybeNullWhen(false)] out BufferScheduleResult result)
+    public bool TrySchedule(IReadOnlyDictionary<TIR.PhysicalBuffer, BufferLifetime> lifetimes, BufferScheduleOptions options, [MaybeNullWhen(false)] out BufferScheduleResult result)
     {
-        long maxMemoryPoolSize = 0;
+        long maxMemoryPoolEnd = options.StartAddress;
         int maxAlignment = 8;
-        foreach (var lifetime in lifetimes)
+        foreach (var lifetime in lifetimes.Values)
         {
-            if (lifetime.Buffer.MemSpan.Location != MemoryLocation)
+            if (lifetime.Buffer.Location != MemoryLocation)
             {
                 throw new ArgumentException($"Memory location to schedule of {lifetime.Buffer} is not expected.");
             }
 
-            var alignment = Math.Max(8, lifetime.Buffer.ElemType.SizeInBytes);
-            maxMemoryPoolSize = MathUtility.AlignUp(maxMemoryPoolSize, alignment) + lifetime.Memory.Size;
+            var alignment = Math.Max(8, lifetime.Buffer.Alignment);
+            maxMemoryPoolEnd = MathUtility.AlignUp(maxMemoryPoolEnd, alignment) + lifetime.Memory.Size;
             maxAlignment = Math.Max(maxAlignment, alignment);
         }
 
-        if (TryScheduleCore(lifetimes, maxMemoryPoolSize, out var memoryPoolSize))
+        if (TryScheduleCore(lifetimes.Values, maxMemoryPoolEnd, options, out var memoryPoolEnd))
         {
-            result = new(lifetimes, memoryPoolSize, maxAlignment);
+            result = new(lifetimes, options.StartAddress, memoryPoolEnd, maxAlignment);
             return true;
         }
         else
@@ -93,5 +96,5 @@ public abstract class BufferScheduler
         }
     }
 
-    protected abstract bool TryScheduleCore(IEnumerable<BufferLifetime> buffers, long maxMemoryPoolSize, out long memoryPoolSize);
+    protected abstract bool TryScheduleCore(IEnumerable<BufferLifetime> lifetimes, long maxMemoryPoolEnd, BufferScheduleOptions options, out long memoryPoolEnd);
 }

@@ -159,6 +159,16 @@ public static class DistributedUtility
         return true;
     }
 
+    public static long GetDivisor(SBP policy, Placement placement)
+    {
+        if (policy is SBPSplit split)
+        {
+            return split.Axes.Select(a => placement.Hierarchy[a]).Aggregate(1L, (a, b) => a * b);
+        }
+
+        return 1;
+    }
+
     public static IReadOnlyList<int> GetDivisors(DistributedType distributedType)
     {
         var rank = distributedType.TensorType.Shape.Rank;
@@ -373,7 +383,7 @@ public static class DistributedUtility
             if (distributedType.AxisPolicies.Count > d && distributedType.AxisPolicies[d] is SBPSplit split)
             {
                 var divisor = split.Axes.Select(t => distributedType.Placement.Hierarchy[t]).Aggregate(1, (a, b) => a * b);
-                tiles[d] = (tiles[d] + divisor - 1) / divisor;
+                tiles[d] = tiles[d] / divisor;
             }
         }
 

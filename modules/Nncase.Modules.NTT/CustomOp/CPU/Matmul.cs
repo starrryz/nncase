@@ -20,9 +20,9 @@ public sealed partial class MatMul : Op
     /// </summary>
     public static readonly ParameterInfo Rhs = new(typeof(MatMul), 1, "rhs", ParameterKind.Input);
 
-    public IRArray<int> LhsPackedAxes { get; }
+    public IRArray<int> LhsVectorizedAxes { get; }
 
-    public IRArray<int> RhsPackedAxes { get; }
+    public IRArray<int> RhsVectorizedAxes { get; }
 
     public bool TransposeA { get; }
 
@@ -38,5 +38,9 @@ public sealed partial class MatMul : Op
 
     public string CSourcePath { get; }
 
-    public override string DisplayProperty() => $"LhsPackedAxes: {LhsPackedAxes}, RhsPackedAxes: {RhsPackedAxes}, TransposeA: {TransposeA}, TransposeB: {TransposeB}";
+    public string FuncName { get; }
+
+    public DataType OutputDataType { get; }
+
+    public override string DisplayProperty() => $"LhsVectorizedAxes: {LhsVectorizedAxes}, RhsVectorizedAxes: {RhsVectorizedAxes}, TransposeA: {TransposeA}, TransposeB: {TransposeB}";
 }

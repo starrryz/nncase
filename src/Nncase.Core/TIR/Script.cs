@@ -36,7 +36,7 @@ public static class T
     /// Load the **One** value from buffer_var.
     /// Equivalent to ((ElemType*)buffer_var)[index].
     /// <remarks>
-    /// If the buffer has packed type like float32*4, but we load the index with lanes 1, so will return only one float32.
+    /// If the buffer has vectorized type like float32*4, but we load the index with lanes 1, so will return only one float32.
     /// </remarks>
     /// <example>
     /// case 1, type = uint32:
@@ -199,7 +199,7 @@ public static class T
     /// ));
     /// </code>
     /// </summary>
-    public static ISequentialBuilder<PrimFunction> PrimFunc(string name, string module_kind, params Var[] parameters)
+    public static ISequentialBuilder<PrimFunction> PrimFunc(string name, string module_kind, params IVar[] parameters)
     {
         return new SequentialBuilder<PrimFunction>(body => new PrimFunction(name, module_kind, body, parameters));
     }
@@ -244,40 +244,13 @@ public static class T
             name = name[4..];
         }
 
+        var alignment = tensorType.DType.SizeInBytes;
         var dimensions = ((RankedShape)tensorType.Shape).Dimensions.ToArray();
         (var size, var strides) = location is MemoryLocation.Input or MemoryLocation.Output
             ? TensorUtilities.GetTensorSizeAndContiguousStrides(tensorType, distributedType)
             : TensorUtilities.GetTensorMaxSizeAndStridesExpr(tensorType, distributedType);
-        var memspan = new MemSpan(size, location);
-        buffer = new Buffer(name, tensorType.DType, memspan, dimensions, strides, distributedType);
-        return buffer;
-    }
-
-    /// <summary>
-    /// create the buffer by expressions.
-    /// </summary>
-    public static Buffer CreateBuffer(DataType dataType, Dimension[] dimensions, MemoryLocation location, out Buffer buffer, [CallerArgumentExpression("buffer")] string name = "")
-    {
-        if (name.StartsWith("var "))
-        {
-            name = name[4..];
-        }
-
-        var strides = TensorUtilities.GetDefaultStrides(dimensions);
-        var size = TensorUtilities.GetProduct(dimensions.ToArray()) * dataType.SizeInBytes;
-        var memspan = new MemSpan(size, location);
-        buffer = new Buffer(name, dataType, memspan, dimensions, strides, null);
-        return buffer;
-    }
-
-    public static Buffer CreateBuffer(DataType dataType, Dimension[] dimensions, Dimension[] strides, MemSpan memSpan, out Buffer buffer, [CallerArgumentExpression("buffer")] string name = "")
-    {
-        if (name.StartsWith("var "))
-        {
-            name = name[4..];
-        }
-
-        buffer = new Buffer(name, dataType, memSpan, dimensions, strides, null);
+        var physicalBuffer = new PhysicalBuffer(alignment, size, location);
+        buffer = new Buffer(name, tensorType.DType, new MemSpan(physicalBuffer), dimensions, strides, distributedType);
         return buffer;
     }
 
@@ -288,12 +261,13 @@ public static class T
             name = name[4..];
         }
 
+        var alignment = tensorType.DType.SizeInBytes;
         var dimensions = ((RankedShape)tensorType.Shape).Dimensions.ToArray();
         (var size, var strides) = location is MemoryLocation.Input or MemoryLocation.Output
             ? TensorUtilities.GetTensorSizeAndContiguousStrides(tensorType, distributedType)
             : TensorUtilities.GetTensorMaxSizeAndStridesExpr(tensorType, distributedType);
-        var memspan = new MemSpan(start, size, location, hierarchy);
-        buffer = new Buffer(name, tensorType.DType, memspan, dimensions, strides, distributedType);
+        var physicalBuffer = new PhysicalBuffer(alignment, size, location);
+        buffer = new Buffer(name, tensorType.DType, new MemSpan(physicalBuffer), dimensions, strides, distributedType);
         return buffer;
     }
 
@@ -307,39 +281,13 @@ public static class T
             name = name[4..];
         }
 
+        var alignment = @const.Value.ElementType.SizeInBytes;
         var dimensions = @const.Value.Dimensions.AsValueEnumerable().Select(x => (Dimension)x).ToArray();
         (var maxSize, var strides) = TensorUtilities.GetTensorMaxSizeAndStrides(@const.CheckedTensorType, @const.ValueType as DistributedType);
-        var memspan = new MemSpan(IR.F.Buffer.AddressOf(@const), maxSize, @const.ValueType is DistributedType ? MemoryLocation.ThreadLocalRdata : MemoryLocation.Rdata);
-        buffer = new Buffer(name, @const.CheckedDataType, memspan, dimensions, strides.Select(i => (Dimension)i).ToArray(), @const.ValueType as DistributedType);
+        var physicalBuffer = new PhysicalBuffer(alignment, IR.F.Buffer.AddressOf(@const), maxSize, @const.GetMemoryLocation());
+        buffer = new Buffer(name, @const.CheckedDataType, new MemSpan(physicalBuffer), dimensions, strides.Select(i => (Dimension)i).ToArray(), @const.ValueType as DistributedType);
         return buffer;
     }
-
-#if false
-    /// <summary>
-    /// maybe can get the const.
-    /// </summary>
-    /// <param name="expr"></param>
-    /// <param name="buffer"></param>
-    /// <param name="name"></param>
-    /// <returns></returns>
-    public static Expr MayBeConst(Const? expr, out Buffer? buffer, [CallerArgumentExpression("buffer")] string name = "")
-    {
-        if (expr is null)
-        {
-            buffer = null;
-            return Nop();
-        }
-        if (name.StartsWith("var "))
-        {
-            name = name[4..];
-        }
-        buffer = new Buffer(name, MemoryLocation.Rdata, (TensorType)expr.ValueType)
-        {
-            Const = expr,
-        };
-        return buffer;
-    }
-#endif
 
     public static ISequentialBuilder<For> ForSegment(out (Dimension B, Dimension E) seg, Dimension low, Dimension chunck, Dimension high)
     {

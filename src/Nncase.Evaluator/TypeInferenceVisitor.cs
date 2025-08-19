@@ -243,7 +243,9 @@ internal sealed partial class TypeInferenceVisitor : ExprVisitor<IRType, Unit>
     protected override IRType VisitLeafFunctionWrapper(FunctionWrapper expr)
     {
         var returnType = ((CallableType)expr.Target.CheckedType).ReturnType;
-        var type = new CallableType(TupleType.Void, new(expr.ParameterTypes.Append(returnType).ToImmutableArray()));
+        var type = expr.ReturnOutput
+            ? new CallableType(returnType, new(expr.ParameterTypes.ToImmutableArray()))
+            : new CallableType(TupleType.Void, new(expr.ParameterTypes.Append(returnType).ToImmutableArray()));
         return type;
     }
 
@@ -367,9 +369,16 @@ internal sealed partial class TypeInferenceVisitor : ExprVisitor<IRType, Unit>
 
     protected override IRType VisitLeafMemSpan(MemSpan expr)
     {
+        VerifySubField(expr, expr.Start, TypePatternUtility.IsDimensionType());
+        VerifySubField(expr, expr.Size, TypePatternUtility.IsDimensionType());
+        return new PointerType(DataTypes.UInt8);
+    }
+
+    protected override IRType VisitLeafPhysicalBuffer(PhysicalBuffer expr)
+    {
         VerifySubField(expr, expr.Start, TypePatternUtility.IsNoneType() | TypePatternUtility.IsIntegralScalar() | TypePatternUtility.IsPointer());
         VerifySubField(expr, expr.Size, TypePatternUtility.IsDimensionType());
-        return expr.Start.CheckedType;
+        return new PointerType(DataTypes.UInt8);
     }
 
     /// <inheritdoc/>

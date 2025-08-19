@@ -15,6 +15,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using CommunityToolkit.HighPerformance;
 using CommunityToolkit.HighPerformance.Helpers;
+using DryIoc.ImTools;
 using NetFabric.Hyperlinq;
 using Nncase.Buffers;
 using Nncase.IR;
@@ -180,7 +181,7 @@ public unsafe sealed partial class Tensor<T> : Tensor, IEnumerable<T>, ICollecti
     /// </summary>
     /// <param name="dimensions">An span of integers that represent the size of each dimension of the DenseTensor to create.</param>
     /// <returns>A new tensor that reinterprets backing Buffer of this tensor with different dimensions.</returns>
-    public Tensor<T> Reshape(ReadOnlySpan<long> dimensions)
+    public override Tensor<T> Reshape(ReadOnlySpan<long> dimensions)
     {
         if (Length != TensorUtilities.GetProduct(dimensions))
         {
@@ -411,11 +412,17 @@ public unsafe sealed partial class Tensor<T> : Tensor, IEnumerable<T>, ICollecti
             {
                 throw new InvalidCastException();
             }
-
-            var converter = (ISpanConverter<T, TTo>)CompilerServices.DataTypeService.GetConverter(typeof(T), typeof(TTo));
-            var tensor = new Tensor<TTo>(dimensions);
-            converter.ConvertTo(Buffer.Span, tensor.Buffer.Span, castMode);
-            return tensor;
+            else if (castMode == CastMode.Reinterpret)
+            {
+                return new Tensor<TTo>(MemoryMarshal.Cast<T, TTo>(Buffer.Span).ToArray(), dimensions);
+            }
+            else
+            {
+                var converter = (ISpanConverter<T, TTo>)CompilerServices.DataTypeService.GetConverter(typeof(T), typeof(TTo));
+                var tensor = new Tensor<TTo>(dimensions);
+                converter.ConvertTo(Buffer.Span, tensor.Buffer.Span, castMode);
+                return tensor;
+            }
         }
     }
 
@@ -436,6 +443,7 @@ public unsafe sealed partial class Tensor<T> : Tensor, IEnumerable<T>, ICollecti
             var fromType = typeof(T);
             var toType = typeof(TTo);
             var toDimensions = Dimensions.ToArray();
+            bool dimensionsChanged = false;
 
             if (fromType.IsGenericType && fromType.GetInterface(typeof(IVector<>).Name) is Type && !toType.IsGenericType)
             {
@@ -448,12 +456,46 @@ public unsafe sealed partial class Tensor<T> : Tensor, IEnumerable<T>, ICollecti
                 {
                     toDimensions[^1] *= count;
                 }
+
+                dimensionsChanged = true;
             }
 
-            var converter = (ISpanConverter<T, TTo>)CompilerServices.DataTypeService.GetConverter(typeof(T), typeof(TTo));
-            var tensor = new Tensor<TTo>(toDimensions);
-            converter.ConvertTo(Buffer.Span, tensor.Buffer.Span, castMode);
-            return tensor;
+            if (castMode == CastMode.Reinterpret)
+            {
+                if (!dimensionsChanged)
+                {
+                    var srcSize = DataType.FromType<T>().SizeInBytes;
+                    var destSize = DataType.FromType<TTo>().SizeInBytes;
+
+                    if (srcSize != destSize)
+                    {
+                        if (toDimensions.Rank == 0)
+                        {
+                            toDimensions = [srcSize / destSize];
+                        }
+                        else
+                        {
+                            if (DataType.FromType<TTo>() is VectorType vt)
+                            {
+                                var acc = toDimensions[^vt.Lanes.Count..].Aggregate(1L, (acc, d) => acc * d);
+                                Enumerable.Range(toDimensions.Length - vt.Lanes.Count, vt.Lanes.Count).ToArray().ForEach(i => toDimensions[i] = 1);
+                                toDimensions[^1] = acc;
+                            }
+
+                            toDimensions[^1] = toDimensions[^1] * srcSize / destSize;
+                        }
+                    }
+                }
+
+                return new Tensor<TTo>(MemoryMarshal.Cast<T, TTo>(Buffer.Span).ToArray(), toDimensions);
+            }
+            else
+            {
+                var converter = (ISpanConverter<T, TTo>)CompilerServices.DataTypeService.GetConverter(typeof(T), typeof(TTo));
+                var tensor = new Tensor<TTo>(toDimensions);
+                converter.ConvertTo(Buffer.Span, tensor.Buffer.Span, castMode);
+                return tensor;
+            }
         }
     }
 

@@ -36,11 +36,11 @@ public class UnitTestEvaluatorTensors : TestClassBase
         var oldShape = new long[] { 1, 3, 16, 16 };
         var newShape = new long[] { 1, 3, 32, 8 };
         var input = OrtKI.Random(oldShape);
-        var expect = OrtKI.Reshape(input, newShape, 0);
+        var expect = OrtKI.Reshape(input, newShape, 0).ToArray<float>();
 
-        var expr = IR.F.Tensors.Bitcast(DataTypes.Float32, input.ToTensor(), DataTypes.Float32, newShape);
+        var expr = IR.F.Tensors.Bitcast(input.ToTensor(), DataTypes.Float32);
         CompilerServices.InferenceType(expr);
-        Assert.Equal(expect, expr.Evaluate().AsTensor().ToOrtTensor());
+        Assert.Equal(expect, expr.Evaluate().AsTensor().ToArray<float>());
     }
 
     [Fact(Skip = "OnnxBug")]
@@ -691,6 +691,26 @@ public class UnitTestEvaluatorTensors : TestClassBase
         var expr = IR.F.Tensors.GatherElements(input, axis, indices);
         CompilerServices.InferenceType(expr);
         Assert.Equal(expect, expr.Evaluate().AsTensor().ToOrtTensor());
+    }
+
+    [Fact]
+    public void TestPack()
+    {
+        var input = new Tensor<int>(new[] { 0, 1, 2, 3, 4, 5, 6, 7 }, [2, 4]);
+        var expect = new Tensor<Vector4<int>>(new[] { Vector4<int>.Create([0, 1, 2, 3]), Vector4<int>.Create([4, 5, 6, 7]) }, [2]);
+        var expr = IR.F.Tensors.Pack(input, [4], [1]);
+
+        Assert.Equal(expect, expr.Evaluate().AsTensor());
+    }
+
+    [Fact]
+    public void TestPackVector()
+    {
+        var input = new Tensor<Vector4<int>>(new[] { Vector4<int>.Create([0, 1, 2, 3]), Vector4<int>.Create([4, 5, 6, 7]) }, [2]);
+        var expect = new Tensor<Vector2x4<int>>(new[] { Vector2x4<int>.Create([0, 1, 2, 3, 4, 5, 6, 7]) }, [1]);
+        var expr = IR.F.Tensors.Pack(input, [2], [0]);
+
+        Assert.Equal(expect, expr.Evaluate().AsTensor());
     }
 
     [Fact]

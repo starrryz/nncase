@@ -14,9 +14,9 @@ public sealed partial class Matmul : NTTKernelOp
 
     public static readonly ParameterInfo LoadC = new(typeof(Matmul), 3, "loadC");
 
-    public IRArray<int> LhsPackedAxes { get; }
+    public IRArray<int> LhsVectorizedAxes { get; }
 
-    public IRArray<int> RhsPackedAxes { get; }
+    public IRArray<int> RhsVectorizedAxes { get; }
 
     public bool TransposeA { get; }
 
@@ -26,5 +26,7 @@ public sealed partial class Matmul : NTTKernelOp
 
     public string CSourcePath { get; }
 
-    public override string DisplayProperty() => $"LhsPackedAxes: {LhsPackedAxes}, RhsPackedAxes: {RhsPackedAxes}, TransposeA: {TransposeA}, TransposeB: {TransposeB}";
+    public string FuncName { get; }
+
+    public override string DisplayProperty() => $"LhsVectorizedAxes: {LhsVectorizedAxes}, RhsVectorizedAxes: {RhsVectorizedAxes}, TransposeA: {TransposeA}, TransposeB: {TransposeB}";
 }

@@ -84,6 +84,11 @@ public partial class ExprFunctor<TExprResult, TTypeResult, TContext>
     internal protected virtual TExprResult VisitTupleConst(TupleConst expr, TContext context) => VisitConst(expr, context);
 
     /// <summary>
+    /// Visit <see cref="TIR.PhysicalBuffer"/>.
+    /// </summary>
+    internal protected virtual TExprResult VisitPhysicalBuffer(TIR.PhysicalBuffer expr, TContext context) => DefaultVisit(expr, context);
+
+    /// <summary>
     /// Visit <see cref="TIR.MemSpan"/>.
     /// </summary>
     internal protected virtual TExprResult VisitMemSpan(TIR.MemSpan expr, TContext context) => DefaultVisit(expr, context);
@@ -154,9 +159,9 @@ public partial class ExprFunctor<TExprResult, TTypeResult, TContext>
     internal protected virtual TExprResult VisitAffineExpr(Affine.AffineExpr expr, TContext context) => DefaultVisit(expr, context);
 
     /// <summary>
-    /// Visit <see cref="Affine.AffineSymbolBase"/>.
+    /// Visit <see cref="Affine.AffineExpr"/>.
     /// </summary>
-    internal protected virtual TExprResult VisitAffineSymbolBase(Affine.AffineSymbolBase expr, TContext context) => VisitAffineExpr(expr, context);
+    internal protected virtual TExprResult VisitAffineSymbolBase(Affine.AffineExpr expr, TContext context) => VisitAffineExpr(expr, context);
 
     /// <summary>
     /// Visit <see cref="Affine.AffineDim"/>.
@@ -461,6 +466,13 @@ public partial class ExprFunctor<TExprResult, TTypeResult>
     /// <inheritdoc/>
     internal protected sealed override TExprResult VisitTupleConst(TupleConst expr, Unit context) => VisitTupleConst(expr);
     /// <summary>
+    /// Visit <see cref="TIR.PhysicalBuffer"/>.
+    /// </summary>
+    internal protected virtual TExprResult VisitPhysicalBuffer(TIR.PhysicalBuffer expr) => base.VisitPhysicalBuffer(expr, default);
+    
+    /// <inheritdoc/>
+    internal protected sealed override TExprResult VisitPhysicalBuffer(TIR.PhysicalBuffer expr, Unit context) => VisitPhysicalBuffer(expr);
+    /// <summary>
     /// Visit <see cref="TIR.MemSpan"/>.
     /// </summary>
     internal protected virtual TExprResult VisitMemSpan(TIR.MemSpan expr) => base.VisitMemSpan(expr, default);
@@ -559,12 +571,12 @@ public partial class ExprFunctor<TExprResult, TTypeResult>
     /// <inheritdoc/>
     internal protected sealed override TExprResult VisitAffineExpr(Affine.AffineExpr expr, Unit context) => VisitAffineExpr(expr);
     /// <summary>
-    /// Visit <see cref="Affine.AffineSymbolBase"/>.
+    /// Visit <see cref="Affine.AffineExpr"/>.
     /// </summary>
-    internal protected virtual TExprResult VisitAffineSymbolBase(Affine.AffineSymbolBase expr) => base.VisitAffineSymbolBase(expr, default);
+    internal protected virtual TExprResult VisitAffineSymbolBase(Affine.AffineExpr expr) => base.VisitAffineSymbolBase(expr, default);
     
     /// <inheritdoc/>
-    internal protected sealed override TExprResult VisitAffineSymbolBase(Affine.AffineSymbolBase expr, Unit context) => VisitAffineSymbolBase(expr);
+    internal protected sealed override TExprResult VisitAffineSymbolBase(Affine.AffineExpr expr, Unit context) => VisitAffineSymbolBase(expr);
     /// <summary>
     /// Visit <see cref="Affine.AffineDim"/>.
     /// </summary>

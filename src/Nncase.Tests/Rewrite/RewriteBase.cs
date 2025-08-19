@@ -1548,7 +1548,7 @@ public sealed class BitcastCase : IRewriteCase
         get
         {
             var input = IR.F.Random.Normal(DataTypes.Float32, 0, 1, 4, new[] { 1, 3, 16, 16 });
-            var expr = IR.F.Tensors.Bitcast(DataTypes.Float32, input, DataTypes.Float32, new[] { 1, 3, 32, 8 });
+            var expr = IR.F.Tensors.Bitcast(input, DataTypes.Float32);
             return new Function(expr, new Var[] { _input });
         }
     }
@@ -2975,10 +2975,10 @@ public sealed class MatMulTransposeCase : IRewriteCase
 
     public IEnumerable<System.Type> Rules => new[] {
         typeof(FoldTwoTransposes),
-        typeof(Passes.Rules.NTT.PackTranspose),
-        typeof(Passes.Rules.NTT.PackMatMul),
-        typeof(Passes.Rules.NTT.FoldPackUnpack),
-        typeof(Passes.Rules.NTT.TransposePackMatMulInputs),
+        typeof(Passes.Rules.NTT.VectorizeTranspose),
+        typeof(Passes.Rules.NTT.VectorizeMatMul),
+        typeof(Passes.Rules.NTT.FoldVectorizeDevectorize),
+        typeof(Passes.Rules.NTT.TransposeVectorizeMatMulInputs),
     };
 
     public Dictionary<IVar, IValue> FeedDict { get; }

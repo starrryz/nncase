@@ -14,9 +14,11 @@
  */
 #pragma once
 #include "apply.h"
+#include "dimension.h"
 #include "primitive_ops.h"
 #include "tensor_traits.h"
 #include "vector.h"
+#include <type_traits>
 
 namespace nncase::ntt::ops {
 // unary_ops ops
@@ -541,25 +543,112 @@ template <Vector TVector1, Vector TVector2> struct cast<TVector1, TVector2> {
     ops::cast<from_type, to_type> op_;
 };
 
+template <Vector TFromVector, Scalar TTo> struct cast_elem<TFromVector, TTo> {
+    using TFromElem = typename TFromVector::element_type;
+
+    constexpr auto operator()(const TFromVector &froms) const noexcept
+        requires(sizeof(TFromElem) == sizeof(TTo))
+    {
+        if constexpr (std::is_same_v<TFromElem, TTo>) {
+            return froms; // No cast needed
+        } else {
+            using TToVector =
+                basic_vector<TTo, typename TFromVector::shape_type>;
+            return ntt::cast<TFromVector, TToVector>()(froms);
+        }
+    }
+
+    constexpr auto operator()(const TFromVector &froms) const noexcept
+        requires(sizeof(TFromElem) > sizeof(TTo))
+    {
+        if constexpr (TFromVector::rank() > 2) {
+            constexpr auto domain = TFromVector::shape().front();
+            using TToInnerVector =
+                std::remove_cv_t<decltype(ntt::cast_elem<TTo>(froms(0_dim)))>;
+            using to_shape_t =
+                std::remove_cv_t<decltype(TToInnerVector::shape().prepend(
+                    domain))>;
+
+            basic_vector<TTo, to_shape_t> tos;
+            ntt::loop<domain>([&](auto outer_index) {
+                tos(outer_index) = ntt::cast_elem<TTo>(froms(outer_index));
+            });
+            return tos;
+        } else {
+            constexpr auto N = TFromVector::shape().front();
+            static_assert(N == sizeof(TFromElem) / sizeof(TTo));
+            constexpr auto lanes = TFromVector::shape().back();
+
+            vector<TTo, N * lanes> tos;
+            ops::cast<TFromElem, TTo> cast_op;
+            ntt::loop<N>([&](auto n) {
+                ntt::loop<lanes>([&](auto lane) {
+                    tos(n * lanes + lane) = cast_op(froms(n, lane));
+                });
+            });
+            return tos;
+        }
+    }
+
+    constexpr auto operator()(const TFromVector &froms) const noexcept
+        requires(sizeof(TFromElem) < sizeof(TTo))
+    {
+        if constexpr (TFromVector::rank() > 1) {
+            constexpr auto domain = TFromVector::shape().front();
+            using TToInnerVector =
+                std::remove_cv_t<decltype(ntt::cast_elem<TTo>(froms(0_dim)))>;
+            using to_shape_t =
+                std::remove_cv_t<decltype(TToInnerVector::shape().prepend(
+                    domain))>;
+
+            basic_vector<TTo, to_shape_t> tos;
+            ntt::loop<domain>([&](auto outer_index) {
+                tos(outer_index) = ntt::cast_elem<TTo>(froms(outer_index));
+            });
+            return tos;
+        } else {
+            constexpr auto N = fixed_dim_v<sizeof(TTo) / sizeof(TFromElem)>;
+            constexpr auto lanes = TFromVector::shape().back() / N;
+
+            vector<TTo, N, lanes> tos;
+            ops::cast<TFromElem, TTo> cast_op;
+            ntt::loop<N>([&](auto n) {
+                ntt::loop<lanes>([&](auto lane) {
+                    tos(n, lane) = cast_op(froms(n * lanes + lane));
+                });
+            });
+            return tos;
+        }
+    }
+};
 } // namespace nncase::ntt::ops
 
 namespace nncase::ntt::vector_ops {
 template <Vector TVector> struct vload_scalar {
     using T = typename TVector::element_type;
 
-    constexpr TVector operator()(const T &value) const noexcept {
+    template <ScalarOrVector U>
+    constexpr TVector operator()(const U &value) const noexcept {
+        const auto domain =
+            TVector::shape()
+                .template slice<0, TVector::rank() - vector_rank_v<U>>();
+
         TVector vec{};
-        ntt::apply(vec.shape(), [&](auto index) { vec(index) = value; });
+        ntt::apply(domain, [&](auto index) { vec(index) = value; });
         return vec;
     }
 };
 
-template <Vector TVector> struct vunaligned_load {
+template <Vector TVector, ScalarOrVector U> struct vunaligned_load {
     using T = typename TVector::element_type;
 
-    constexpr TVector operator()(const T *ptr) const noexcept {
+    constexpr TVector operator()(const U *ptr) const noexcept {
+        const auto domain =
+            TVector::shape()
+                .template slice<0, TVector::rank() - vector_rank_v<U>>();
+
         TVector vec{};
-        ntt::apply(vec.shape(), [&](auto index) { vec(index) = *ptr++; });
+        ntt::apply(domain, [&](auto index) { vec(index) = *ptr++; });
         return vec;
     }
 };
@@ -600,14 +689,16 @@ struct vmma {
 
 namespace nncase::ntt {
 template <Scalar T, FixedShape Lanes>
-basic_vector<T, Lanes> basic_vector<T, Lanes>::from_scalar(T value) noexcept {
+template <ScalarOrVector U>
+basic_vector<T, Lanes> basic_vector<T, Lanes>::from_scalar(U value) noexcept {
     return vector_ops::vload_scalar<basic_vector<T, Lanes>>()(value);
 }
 
 template <Scalar T, FixedShape Lanes>
+template <ScalarOrVector U>
 basic_vector<T, Lanes>
-basic_vector<T, Lanes>::unaligned_load_from(const T *ptr) noexcept {
-    return vector_ops::vunaligned_load<basic_vector<T, Lanes>>()(ptr);
+basic_vector<T, Lanes>::unaligned_load_from(const U *ptr) noexcept {
+    return vector_ops::vunaligned_load<basic_vector<T, Lanes>, U>()(ptr);
 }
 
 template <bool AccC, bool TransA = false, Vector T1, Vector T2, Vector TResult>

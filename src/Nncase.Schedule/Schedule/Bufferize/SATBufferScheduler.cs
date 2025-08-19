@@ -17,55 +17,68 @@ public sealed class SATBufferScheduler : BufferScheduler
     {
     }
 
-    protected override bool TryScheduleCore(IEnumerable<BufferLifetime> lifetimes, long maxMemoryPoolSize, out long memoryPoolSize)
+    protected override bool TryScheduleCore(IEnumerable<BufferLifetime> lifetimes, long maxMemoryPoolEnd, BufferScheduleOptions options, out long memoryPoolEnd)
     {
         var model = new CpModel();
         var noOverlap = model.AddNoOverlap2D();
-        var boxs = new Dictionary<TIR.Buffer, Box>(ReferenceEqualityComparer.Instance);
+        var boxs = new Dictionary<TIR.PhysicalBuffer, Box>(ReferenceEqualityComparer.Instance);
         var yEnds = new List<LinearExpr>();
 
         int bufferId = 0;
         foreach (var lifetime in lifetimes)
         {
-            var xInterval = model.NewIntervalVar(model.NewConstant(lifetime.Time.Start), model.NewConstant(lifetime.Time.Size), model.NewConstant(lifetime.Time.Stop), lifetime.Buffer.Name + $"{bufferId}_x");
+            if (lifetime.Memory.Size == 0)
+            {
+                continue; // Skip buffers with zero size
+            }
+
+            var xInterval = model.NewIntervalVar(model.NewConstant(lifetime.Time.Start), model.NewConstant(lifetime.Time.Size), model.NewConstant(lifetime.Time.Stop), $"{bufferId}_x");
             var memSize = lifetime.Memory.Size;
-            var maxMemStart = maxMemoryPoolSize - memSize;
+            var maxMemStart = maxMemoryPoolEnd - memSize;
             if (maxMemStart < 0)
             {
                 throw new ArgumentException($"Invalid buffer size");
             }
 
-            var memStartVar = model.NewIntVar(0, maxMemStart, $"{lifetime.Buffer.Name}_{bufferId}_y_start");
-            var yInterval = model.NewFixedSizeIntervalVar(memStartVar, memSize, $"{lifetime.Buffer.Name}_{bufferId}_y");
+            var memStartVar = model.NewIntVar(options.StartAddress, maxMemStart, $"{bufferId}_y_start");
+            var yInterval = model.NewFixedSizeIntervalVar(memStartVar, memSize, $"{bufferId}_y");
             yEnds.Add(yInterval.EndExpr());
 
-            var alignment = lifetime.Buffer.ElemType.SizeInBytes;
+            var alignment = lifetime.Buffer.Alignment;
             model.AddModuloEquality(0, memStartVar, alignment);
             noOverlap.AddRectangle(xInterval, yInterval);
             boxs.Add(lifetime.Buffer, new(xInterval, yInterval));
             bufferId++;
         }
 
-        var memPoolSizeVar = model.NewIntVar(0, maxMemoryPoolSize, nameof(maxMemoryPoolSize));
-        model.AddMaxEquality(memPoolSizeVar, yEnds);
-        model.Minimize(memPoolSizeVar);
+        var memPoolEndVar = model.NewIntVar(0, maxMemoryPoolEnd, nameof(maxMemoryPoolEnd));
+        model.AddMaxEquality(memPoolEndVar, yEnds);
+        model.Minimize(memPoolEndVar);
 
         var solver = new CpSolver();
         solver.StringParameters = $"max_time_in_seconds:{600},num_workers:{Environment.ProcessorCount}";
         CpSolverStatus solve_status = solver.Solve(model);
         if (solve_status != CpSolverStatus.Optimal && solve_status != CpSolverStatus.Feasible)
         {
-            memoryPoolSize = default;
+            memoryPoolEnd = default;
             return false;
         }
 
         foreach (var lifetime in lifetimes)
         {
-            lifetime.Memory.Start = checked(solver.Value(boxs[lifetime.Buffer].Y.StartExpr()));
-            lifetime.Memory.Stop = checked(solver.Value(boxs[lifetime.Buffer].Y.EndExpr()));
+            if (lifetime.Memory.Size == 0)
+            {
+                lifetime.Memory.Start = options.StartAddress;
+                lifetime.Memory.Stop = options.StartAddress;
+            }
+            else
+            {
+                lifetime.Memory.Start = checked(solver.Value(boxs[lifetime.Buffer].Y.StartExpr()));
+                lifetime.Memory.Stop = checked(solver.Value(boxs[lifetime.Buffer].Y.EndExpr()));
+            }
         }
 
-        memoryPoolSize = solver.Value(memPoolSizeVar);
+        memoryPoolEnd = solver.Value(memPoolEndVar);
         return true;
     }
 
