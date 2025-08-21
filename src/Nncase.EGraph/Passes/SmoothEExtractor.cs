@@ -2,11 +2,13 @@
 // Licensed under the Apache license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Collections.Concurrent;      // F: 缓存用
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;       // F: 计算 dump hash
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Nncase.CostModel;
@@ -21,6 +23,7 @@ namespace Nncase.Passes;
 /// </summary>
 internal sealed class SmoothEExtractor : IEGraphExtractor
 {
+    private static readonly ConcurrentDictionary<string, string> SelectionCache = new();
     private EGraphCostModel _costModel;
     private CompileOptions _compileOptions;
 
@@ -117,7 +120,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
 
         // 将输出的json文件放入更新在外部目录，方便共享
         var sharedRootDir = "/compiler/external_shared";
-        var smootheDatasetDir = "/compiler/smoothe-sync/dataset/data_from_nncase";
+        var smootheDatasetDir = "/compiler/smoothe-sync/dataset";
         var sharedInputDir = Path.Combine(sharedRootDir, "input");
         var sharedOutputDir = Path.Combine(sharedRootDir, "output"); // 预留：后续 smoothe 输出可统一指向这里
         var nncaseTestsBinDir = "/compiler/nncase/src/Nncase.Tests/bin/Release/net8.0";
@@ -125,19 +128,41 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         // 生成时间戳前缀，例如 0814_14_52
         string timestamp = DateTime.Now.ToString("MMdd_HH_mm");
 
+        // 生成独立数据集
+        var datasetname = $"{timestamp}_nncase_data";
+        var datasetRoot = Path.Combine(smootheDatasetDir, datasetname);
+
+        // 用 dump 内容哈希或时间戳做唯一名，防止并发/覆盖
+        Directory.CreateDirectory(datasetRoot);
+
         // 用时间戳生成两个文件名
         var dumpFileName = $"{timestamp}_dump.json";
         var selectionFileName = $"{timestamp}_selection.json";
 
         var egraphDumpPath = Path.Combine(sharedInputDir, dumpFileName);
-        var egraphDumpPath2 = Path.Combine(smootheDatasetDir, dumpFileName);
+        var egraphDumpPath2 = Path.Combine(datasetRoot, dumpFileName);
         File.WriteAllText(egraphDumpPath, JsonSerializer.Serialize(flexRoot, opts));
         File.WriteAllText(egraphDumpPath2, JsonSerializer.Serialize(flexRoot, opts));
 
-        // === 7) 调用子进程运行 smoothe（工作目录保持为 smoothe 仓库） ===
+        // --- F: 计算 dump 哈希并尝试命中缓存 ---,这一块貌似有问题，先理解一下
+        string dumpHash;
+        using (var sha = SHA256.Create())
+        using (var fs = File.OpenRead(egraphDumpPath))
+        {
+            dumpHash = Convert.ToHexString(sha.ComputeHash(fs)); // 无连字符，已是大写HEX
+        }
+
+        if (SelectionCache.TryGetValue(dumpHash, out var cachedSel) && File.Exists(cachedSel))
+        {
+            // 直接复用缓存的 selection 路径
+            return SmoothESelection.ExtractWithSmoothe(rootClass, eGraph, cachedSel);
+        }
+
+        // === 7) 调用子进程运行 smoothe（工作目录保持为 smoothe-sync 仓库） ===
         var smootheRepoDir = "/compiler/smoothe-sync";
         var condaExe = "/opt/conda/condabin/conda";
-        var args = "run -n smoothe-env python launch.py --acyclic --dataset data_from_nncase --method smoothe --repeat 1 --greedy_ini";
+        var args = $"run -n smoothe-env python launch.py " +
+                   $"--acyclic --dataset {datasetname} --method smoothe --repeat 1 --greedy_ini";
 
         var psi = new System.Diagnostics.ProcessStartInfo
         {
@@ -152,11 +177,25 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
 
         using var proc = System.Diagnostics.Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start smoothe subprocess (conda run).");
-        string stdOut = proc.StandardOutput.ReadToEnd();
-        string stdErr = proc.StandardError.ReadToEnd();
 
-        // 硬超时（按需调整）
-        if (!proc.WaitForExit((int)TimeSpan.FromMinutes(15).TotalMilliseconds))
+        // --- C: 异步采集输出，保证超时可用 ---
+        var sbOut = new System.Text.StringBuilder();
+        var sbErr = new System.Text.StringBuilder();
+        proc.OutputDataReceived += (_, e) => { if (e.Data != null)
+            {
+                sbOut.AppendLine(e.Data);
+            }
+        };
+        proc.ErrorDataReceived += (_, e) => { if (e.Data != null)
+            {
+                sbErr.AppendLine(e.Data);
+            }
+        };
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+
+        bool finished = proc.WaitForExit((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
+        if (!finished)
         {
             try
             {
@@ -169,12 +208,18 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
             throw new TimeoutException("smoothe subprocess timeout.");
         }
 
-        if (proc.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"smoothe subprocess failed with exit code {proc.ExitCode}.\n[stdout]\n{stdOut}\n[stderr]\n{stdErr}");
-        }
+        // 让异步缓冲区完全刷出
+        proc.WaitForExit();
 
+        // --- C 结束 ---
+        string stdOut = sbOut.ToString();
+        string stdErr = sbErr.ToString();
+
+        // --- D: 不立刻因非 0 退出码抛错；先去找 selection ---
+        // 留到后面 “找 selection” 失败时，再带上 exit code 和日志一并抛错。
+        bool smootheOk = proc.ExitCode == 0;
+
+        // 子进程运行完了，生成了对应的selection，但是有可能没有find到对应的
         // 新建目录，如已存在相当于做一次检查，
         Directory.CreateDirectory(nncaseTestsBinDir);
 
@@ -207,7 +252,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         if (foundSelection is null || !File.Exists(foundSelection))
         {
             throw new FileNotFoundException(
-                $"Cannot locate selection json produced by smoothe.\n" +
+                $"Cannot locate selection json produced by smoothe. ExitCode={proc.ExitCode}.\n" +
                 $"Tried: {string.Join(", ", candidateSelectionPaths)}\n" +
                 $"WorkingDirectory: {smootheRepoDir}\n[stdout]\n{stdOut}\n[stderr]\n{stdErr}");
         }
@@ -217,16 +262,19 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         var selectionPath = Path.Combine(nncaseTestsBinDir, selectionFileName);
         var externalOutputPath = Path.Combine(sharedOutputDir, selectionFileName);
 
-        // first copy and then check
+        // try setinto cache
+        SelectionCache[dumpHash] = externalOutputPath;
+
+        // first copy and then check || all set into externalshared
         File.Copy(foundSelection, selectionPath, overwrite: true);
         File.Copy(foundSelection, externalOutputPath, overwrite: true);
-        if (!File.Exists(selectionPath) || !File.Exists(externalOutputPath))
+        if (!File.Exists(externalOutputPath))
         {
-            throw new FileNotFoundException($"selection json not found: {selectionPath}");
+            throw new FileNotFoundException($"selection json not found: {externalOutputPath}");
         }
 
         // and finally back here and use it
-        var extracted = SmoothESelection.ExtractWithSmoothe(rootClass, eGraph, selectionPath);
+        var extracted = SmoothESelection.ExtractWithSmoothe(rootClass, eGraph, externalOutputPath);
 
         // (optional) intend to verify it by dump dot
         try
