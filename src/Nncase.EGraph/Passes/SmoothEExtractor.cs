@@ -21,15 +21,15 @@ namespace Nncase.Passes;
 /// </summary>
 internal sealed class SmoothEExtractor : IEGraphExtractor
 {
-    private EGraphCostModel? _costModel;
+    private EGraphCostModel _costModel;
     private CompileOptions _compileOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SmoothEExtractor"/> class.
     /// </summary>
-    public SmoothEExtractor(CompileOptions compileOptions)
+    public SmoothEExtractor(CompileOptions compileOptions, EGraphCostModel costModel)
     {
-        _costModel = null; // 先不赋具体值
+        _costModel = costModel; // 先不赋具体值
         _compileOptions = compileOptions;
     }
 
@@ -38,8 +38,6 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
     {
         // 1) 规范 root
         var rootClass = root.Find();
-        var evaluator = new EGraphCostEvaluator(root.Find(), _compileOptions, null);
-        _costModel = evaluator.Evaluate();
 
         // 2) 收集可达 EClass
         var reachableClasses = CollectReachableClasses(rootClass);
@@ -215,6 +213,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         }
 
         // if find, copy this into where can be used by nncase
+        // 运行pass的时候，堵在将文件复制到指定目录这一步了
         var selectionPath = Path.Combine(nncaseTestsBinDir, selectionFileName);
         var externalOutputPath = Path.Combine(sharedOutputDir, selectionFileName);
 

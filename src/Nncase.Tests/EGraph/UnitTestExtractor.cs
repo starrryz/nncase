@@ -105,7 +105,10 @@ public class UnitTestExtractor : TestClassBase
         // 以上都是剽窃自上一个测试的图
         // var allClasses = egraph.Classes.ToList();
         var rootClass = root.Find();
-        var extractor = new SmoothEExtractor(CompileOptions);
+        var evaluator = new EGraphCostEvaluator(root.Find(), CompileOptions, null);
+        var costmodel = evaluator.Evaluate();
+
+        var extractor = new SmoothEExtractor(CompileOptions, costmodel);
         var extracted = extractor.Extract(rootClass, egraph, Array.Empty<EGraphExtractConstrains>());
 
         Assert.NotNull(extracted);

@@ -166,7 +166,18 @@ internal class EGraphExtractor : IEGraphExtractor
             EGraphPrinter.DumpEgraphAsDot(eGraph, _costModel, picks, root.Find(), dumpStream);
         }
 
-        return new SatExprBuildVisitor(picks).Visit(root);
+        BaseExpr res = new SatExprBuildVisitor(picks).Visit(root);
+        try
+        {
+            var egAfter = new EGraph();
+            _ = egAfter.Add(res);
+            EGraphPrinter.DumpEgraphAsDot(egAfter, "origin_extract.dot");
+        }
+        catch
+        {
+        }
+
+        return res;
     }
 
     private static HyperGraph<EClass, ENode> ToHyperGraph(EClass root)
