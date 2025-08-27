@@ -404,6 +404,9 @@ public class DeviceCSourceConvertVisitor : CSourceConvertVisitor
                     Indent = new string(' ', IndentScope.Writer.Indent),
                 }).Result);
                 break;
+            case TIR.NTT.RoPE rope:
+                WriteIndWithProfiler($"rope({arguments[0].Name}, {arguments[1].Name}, {arguments[2].Name}, {arguments[3].Name});\n");
+                break;
             case TIR.NTT.Cast cast:
                 {
                     string postOps = string.Empty;
@@ -424,6 +427,13 @@ public class DeviceCSourceConvertVisitor : CSourceConvertVisitor
                         Indent = new string(' ', IndentScope.Writer.Indent),
                         Args = expr.Arguments[..1].ToArray(),
                     }).Result);
+                }
+
+                break;
+            case TIR.NTT.Pad pad:
+                {
+                    var padValueType = expr.Arguments[0].CheckedTensorType.DType is VectorType vt ? vt.ElemType : expr.Arguments[0].CheckedTensorType.DType;
+                    WriteWithProfiler($"pad({arguments[0].Name}, {arguments[2].Name}, {arguments[1].Name}, {expr.Arguments[0].CheckedDataType.ToC()} {{ ({padValueType.ToC()}){pad.PadValue} }});\n");
                 }
 
                 break;
