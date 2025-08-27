@@ -120,12 +120,12 @@ args = 'tests/llm/prompt.txt'
 [target]
 
 [target.cpu]
-eval = true
-infer = true
+eval = false
+infer = false
 similarity_name = 'cosine'
 
 [target.cpu.mode.noptq]
-enabled = true
+enabled = false
 threshold = 0.999
 
 [target.cpu.mode.ptq]
@@ -164,7 +164,7 @@ enabled = true
 threshold = 0.96
 
 [target.xpu]
-eval = false
+eval = true
 infer = true
 similarity_name = 'cosine'
 
@@ -173,7 +173,7 @@ enabled = true
 threshold = 0.999
 
 [target.xpu.mode.ptq]
-enabled = false
+enabled = true
 threshold = 0.9
 
 [target.xpu.target_options]

@@ -194,7 +194,7 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
 
-        bool finished = proc.WaitForExit((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
+        bool finished = proc.WaitForExit((int)TimeSpan.FromMinutes(60).TotalMilliseconds);
         if (!finished)
         {
             try
@@ -238,14 +238,22 @@ internal sealed class SmoothEExtractor : IEGraphExtractor
         // rescued by recursive search the whole dir
         if (foundSelection is null)
         {
-            var cand = new DirectoryInfo(smootheRepoDir)
-                .EnumerateFiles("*_selection.json", SearchOption.AllDirectories)
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .FirstOrDefault();
-            if (cand is not null)
-            {
-                foundSelection = cand.FullName;
-            }
+            // var cand = new DirectoryInfo(smootheRepoDir)
+            //     .EnumerateFiles("full_layer_selection.json", SearchOption.AllDirectories)
+            //     .OrderByDescending(f => f.LastWriteTimeUtc)
+            //     .FirstOrDefault();
+            // if (cand is not null)
+            // {
+            //     foundSelection = cand.FullName;
+            //     // throw new FileNotFoundException(
+            //     //     $"SmoothE selection file use existed: '{foundSelection}'.\n" +
+            //     //     "Searched locations:\n" +
+            //     //     string.Join(Environment.NewLine, candidateSelectionPaths));
+            // }
+            throw new FileNotFoundException(
+                    $"SmoothE selection file not find: '{selectionFileName}'.\n" +
+                    "Searched locations:\n" +
+                    string.Join(Environment.NewLine, candidateSelectionPaths));
         }
 
         // no method is valid, throw error
