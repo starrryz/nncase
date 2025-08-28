@@ -47,14 +47,15 @@ public static class EGraphExtensions
         var costModel = new CostModel.EGraphCostEvaluator(root.Find(), compileOptions, basefunc_cost_evaluator, false).Evaluate();
 
         // switch to smoothe (need to do : choose 1 from 2 by inheriting the same interface)
-        // var in_expr = new SmoothEExtractor(compileOptions, costModel).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
+        var in_expr = new SmoothEExtractor(compileOptions, costModel).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
 
-        // // first soft in smoothe, next hard in cp-sat
-        // var in_egraph = new EGraph();
-        // var root_new = in_egraph.Add(in_expr);
-        // in_egraph.Rebuild();
-        // var costModel1 = new CostModel.EGraphCostEvaluator(root_new.Find(), compileOptions, basefunc_cost_evaluator, false).Evaluate();
-        // return new EGraphExtractor(costModel1).Extract(root_new.Find(), in_egraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
-        return new EGraphExtractor(costModel).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
+        // first soft in smoothe, next hard in cp-sat
+        var in_egraph = new EGraph();
+        var root_new = in_egraph.Add(in_expr);
+        in_egraph.Rebuild();
+        var costModel1 = new CostModel.EGraphCostEvaluator(root_new.Find(), compileOptions, basefunc_cost_evaluator, false).Evaluate();
+        return new EGraphExtractor(costModel1).Extract(root_new.Find(), in_egraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
+
+        // return new EGraphExtractor(costModel).Extract(root.Find(), eGraph, constrains ?? Array.Empty<EGraphExtractConstrains>());
     }
 }
