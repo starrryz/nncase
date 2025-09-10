@@ -67,3 +67,9 @@ src/Nncase.Tests/EGraph/UnitTestExtractor.cs merge=ours
 src/Nncase.Core/Passes/IEGraphExtractor.cs merge=ours
 src/Nncase.EGraph/Passes/EGraphExtractor.cs merge=ours
 src/Nncase.EGraph/Passes/SmoothEExtractor.cs merge=ours
+
+ntt/CMakeLists.txt merge=ours
+src/Nncase.Cli/Compile.cs merge=ours
+src/Nncase.Cli/Program.cs merge=ours
+src/Nncase.EGraph/Passes/EGraphExtensions.cs merge=ours
+tests/importer/huggingface_/test_qwen2.py merge=ours
