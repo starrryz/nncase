@@ -9,6 +9,7 @@ using System.CommandLine.Hosting;
 using System.CommandLine.Parsing;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -142,6 +143,65 @@ internal partial class Program
         compileOptions.ShapeBucketOptions.SegmentsCount = 2;
 #endif
 
+        // === 确保 ShapeBucketOptions 不为 null，并设定默认 ===
+        compileOptions.ShapeBucketOptions ??= new ShapeBucketOptions
+        {
+            Enable = false,
+            SegmentsCount = 0,
+            RangeInfo = new Dictionary<string, (int Min, int Max)>(),
+            FixVarMap = new Dictionary<string, int>(),
+
+            // 如果有其它默认字段，也在这里一并初始化
+        };
+
+        // 读取 --sb-enable
+        var sbEnableVal = context.ParseResult.GetValueForOption(compilecmd.SbEnable); // 如果你在 Compile.cs 暴露了属性
+        compileOptions.ShapeBucketOptions.Enable = sbEnableVal;
+
+        // 读取 --sb-segments（可为空）
+        var sbSegmentsVal = context.ParseResult.GetValueForOption(compilecmd.SbSegments);
+        if (sbSegmentsVal.HasValue)
+        {
+            compileOptions.ShapeBucketOptions.SegmentsCount = sbSegmentsVal.Value;
+        }
+
+        // 读取 --sb-range（可多次）
+        var sbRanges = context.ParseResult.GetValueForOption(compilecmd.SbRange) ?? Array.Empty<string>();
+        foreach (var item in sbRanges)
+        {
+            // 形如 name=min:max
+            // 例：seq_len=1:512
+            var eq = item.IndexOf('=', StringComparison.Ordinal);
+            var colon = item.LastIndexOf(':');
+
+            if (eq <= 0 || colon <= eq + 1 || colon >= item.Length - 1)
+            {
+                Console.Error.WriteLine($"[ncc] Invalid --sb-range '{item}', expect name=min:max");
+                Environment.ExitCode = 2;
+                return compileOptions;
+            }
+
+            var name = item.Substring(0, eq).Trim();
+            var minStr = item.Substring(eq + 1, colon - (eq + 1)).Trim();
+            var maxStr = item.Substring(colon + 1).Trim();
+
+            if (!int.TryParse(minStr, out var min) || !int.TryParse(maxStr, out var max) || min > max)
+            {
+                Console.Error.WriteLine($"[ncc] Invalid range in --sb-range '{item}', got min='{minStr}', max='{maxStr}'");
+                Environment.ExitCode = 2;
+                return compileOptions;
+            }
+
+            compileOptions.ShapeBucketOptions.RangeInfo[name] = (min, max);
+        }
+
+        // dotnet src/Nncase.Cli/bin/Debug/net8.0/Nncase.Cli.dll compile \
+        //   ../Qwen3-0.6B examples/test.kmodel cpu \
+        //   -i huggingface \
+        //   --sb-enable \
+        //   --sb-segments 2 \
+        //   --sb-range history_len=0:64 \
+        //   --sb-range seq_len=1:512
         foreach (var item in context.ParseResult.GetValueForOption(compilecmd.FixedVars)!)
         {
             compileOptions.ShapeBucketOptions.FixVarMap.Add(item.Name, item.Value);

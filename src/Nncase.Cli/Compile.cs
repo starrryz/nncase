@@ -166,6 +166,24 @@ internal sealed class CompileCommand : Command
             description: "the attention backend, only support for huggface format",
             getDefaultValue: () => HuggingFaceAttentionBackendKind.Default);
 
+        // === ShapeBucket 相关选项（逐项解析，和现有 CLI 风格一致） ===
+        SbEnable = new Option<bool>(
+            name: "--sb-enable",
+            description: "Enable Shape Buckets.",
+            getDefaultValue: () => false);
+        AddGlobalOption(SbEnable);
+
+        SbSegments = new Option<int?>(
+            name: "--sb-segments",
+            description: "Segments count for Shape Buckets (optional).");
+        AddGlobalOption(SbSegments);
+
+        SbRange = new Option<string[]>(
+            name: "--sb-range",
+            description: "Shape ranges (repeatable). Format: name=min:max, e.g. --sb-range sequence_length=1:512",
+            getDefaultValue: () => Array.Empty<string>());
+
+        AddGlobalOption(SbRange);
         AddArgument(InputFile);
         AddArgument(OutputFile);
         AddGlobalOption(InputFormat);
@@ -251,4 +269,10 @@ internal sealed class CompileCommand : Command
     public Option<bool> HFOutputHiddenStates { get; }
 
     public Option<HuggingFaceAttentionBackendKind> HFAttenionBackend { get; }
+
+    public Option<bool> SbEnable { get; }
+
+    public Option<int?> SbSegments { get; }
+
+    public Option<string[]> SbRange { get; }
 }
