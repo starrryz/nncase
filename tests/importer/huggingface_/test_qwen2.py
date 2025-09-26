@@ -30,7 +30,8 @@ def test_qwen2(request):
     [huggingface_options]
     output_logits = true
     output_hidden_states = false
-    num_layers = 1
+    num_layers = -1
+    tensor_type = "float32"
 
     [generator]
     [generator.inputs]
